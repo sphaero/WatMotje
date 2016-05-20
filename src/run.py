@@ -8,12 +8,29 @@ import sys
 import asyncore, socket
 import time
 import json
-from BaseHTTPServer import BaseHTTPRequestHandler
-from StringIO import StringIO
-from websocketserver import *
+
+try:
+    from BaseHTTPServer import BaseHTTPRequestHandler
+except ImportError: # Py3
+    from http.server import BaseHTTPRequestHandler
+
+try:
+    from StringIO import StringIO
+except ImportError: # Py3
+    from io import BytesIO as StringIO
+
 import logging
+import os
+from SimpleWebSocketServer import AsyncoreWebSocketServer, AsyncoreWebSocketServerHandler
 
 msgs = []
+
+### Requirements:
+# sudo pip3 install -U protobuf==3.0.0b3
+# sudo apt-get install python3-dateutil python-dateutil
+# sudo pip3 install python-axolotl
+# 
+
 
 # http://stackoverflow.com/questions/4685217/parse-raw-http-headers
 class HTTPRequest(BaseHTTPRequestHandler):
@@ -34,16 +51,15 @@ class HTTPHandler(asyncore.dispatcher):
 
     def handle_read(self):
         data = self.recv(1024)
-        print(data)
         request = HTTPRequest(data)
         print(request.command, request.headers.keys())
         if request.path == '/':
             with open('test.html', 'r+') as f:
                 data = f.read()
-            self.send('HTTP/1.1 200 OK\n\n{0}'.format(data))
+            self.send('HTTP/1.1 200 OK\n\n{0}'.format(data).encode('utf-8'))
         else:
             ret_msg = json.dumps(msgs)
-            self.send('HTTP/1.1 200 OK\nContent-Type: application/json\n\n{0}'.format(json.dumps(msgs)))
+            self.send('HTTP/1.1 200 OK\nContent-Type: application/json\n\n{0}'.format(json.dumps(msgs).encode('utf-8')))
         self.close()
 
 
@@ -122,36 +138,54 @@ class EchoLayer(YowInterfaceLayer):
             print("Echoing vcard (%s, %s) to %s" % (messageProtocolEntity.getName(), messageProtocolEntity.getCardData(), messageProtocolEntity.getFrom(False)))
 
 
-if __name__ == '__main__':
-    #logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
-    logger = logging.getLogger()
-    logger.setLevel(logging.DEBUG)
-    logger.addHandler(logging.StreamHandler())
+class WSEcho(AsyncoreWebSocketServerHandler):
 
+   def handleMessage(self):
+      self.sendMessage(self.data)
+
+   def handleConnected(self):
+      print('New WS client connected') 
+
+   def handleClose(self):
+      pass
+
+
+if __name__ == '__main__':
+    logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
+
+    data = ""
+    # load previous messages
     try:
         with open("messages.txt", "r+") as f:
             data = f.read()
-        for msg in data.split('\n'):
-            try:
-                msgs.append(msg.split(';')[1])
-            except IndexError:
-                pass
-        credentials = ("31644498790", "zbDuAd06fz2nH7QjXpiktwJ3qQY=")
+    except FileNotFoundError: # create it
+        open("messages.txt", 'a').close()
+
+    for msg in data.split('\n'):
+        try:
+            msgs.append(msg.split(';')[1])
+        except IndexError:
+            pass
+    
+    try:
+        # HTTP server
         server = HTTPServer(('', 8080))
-        
+        print("Starting WebServer on port 8000")
         # ws server
         host=""
         port=9004
         print("Starting WebSocketServer on %s, port %s" %(host, port))
-        wsserver = WebSocketServer(host, port)
+        wsserver = AsyncoreWebSocketServer(host, port, WSEcho)
         
-        #asyncore.loop()
-        stack = YowsupEchoStack(credentials, True)
-        stack.start()
+        # whatsapp client
+        credentials = json.loads(open(os.path.join(os.path.expanduser('~'), '.yowsup/.yowsup')).read())
+        wsapp = YowsupEchoStack((credentials['login'], credentials['pw']), True)
+        print("Starting Whatsapp client")
+        wsapp.start()
     except KeyboardInterrupt:
         print("\nYowsdown")
     #finally:
         wsserver.running = False
         wsserver.close()
-        #server.close()
+        server.close()
         sys.exit(0)
