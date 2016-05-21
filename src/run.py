@@ -120,11 +120,14 @@ class EchoLayer(YowInterfaceLayer):
         self.toLower(entity.ack())
 
     def onTextMessage(self,messageProtocolEntity):
+        global wsserver
         msg = messageProtocolEntity.getBody()
-        print("Echoing %s to %s" % (msg, messageProtocolEntity.getFrom(False)))
+        sender = messageProtocolEntity.getFrom(False)
+        print("Echoing %s to %s" % (msg, sender))
+        wsserver.broadcast("{0};{1};{2}\n".format(time.time(), sender, msg))
         msgs.append(msg)
         with open("messages.txt", "a") as f:
-            f.write("{0};{1}\n".format(time.time(), msg))
+            f.write("{0};{1};{2}\n".format(time.time(), sender, msg))
 
     def onMediaMessage(self, messageProtocolEntity):
         # just print info
@@ -141,13 +144,10 @@ class EchoLayer(YowInterfaceLayer):
 class WSEcho(AsyncoreWebSocketServerHandler):
 
    def handleMessage(self):
-      self.sendMessage(self.data)
+      self.sendMessage("blablabla")
 
    def handleConnected(self):
       print('New WS client connected') 
-
-   def handleClose(self):
-      pass
 
 
 if __name__ == '__main__':
